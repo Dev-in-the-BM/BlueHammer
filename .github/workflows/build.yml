@@ -1,0 +1,66 @@
+name: Build BlueHammer Multi-Arch
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write # Required to allow the action to push files back to your repo
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86
+            platform: Win32
+          - arch: x64
+            platform: x64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build BlueHammer
+        run: msbuild FunnyApp.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }}
+
+      - name: Rename for collection
+        # Rename the output so the two architectures don't overwrite each other
+        run: |
+          if (Test-Path "Release/FunnyApp.exe") { Move-Item "Release/FunnyApp.exe" "BlueHammer_x86.exe" }
+          if (Test-Path "x64/Release/FunnyApp.exe") { Move-Item "x64/Release/FunnyApp.exe" "BlueHammer_x64.exe" }
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlueHammer-${{ matrix.arch }}
+          path: BlueHammer_*.exe
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries-temp
+          merge-multiple: true
+
+      - name: Move to binaries folder
+        run: |
+          mkdir -p binaries
+          mv binaries-temp/*.exe binaries/
+          rm -rf binaries-temp
+
+      - name: Commit and Push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Build: update binaries [skip ci]"
+          file_pattern: 'binaries/*.exe'
+          branch: main
